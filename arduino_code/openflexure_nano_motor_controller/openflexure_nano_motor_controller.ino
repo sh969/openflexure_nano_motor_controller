@@ -1,5 +1,5 @@
 /*
- * OpenFlexure Microscope motor controoler
+ * OpenFlexure Microscope motor controler
  * Adapted from James Sharkey's Arduino-powered stepper driver
  * Substantially rewritten Richard Bowman, Spring 2017
  * Written by James Sharkey, Spring 2015
@@ -9,6 +9,8 @@
  * https://github.com/rwb27/openflexure_microscope/
  * 
  * (c) Richard Bowman & James Sharkey, Released under GPL v3, 2017
+ * Edited by Sebastian Horstmann Spring 2018
+ * Added x, y, z optical barrier support for stage reference position
  */
 #include <StepperF_alt.h>   //Fergus's hacked stepper library
 #include <assert.h>
@@ -33,6 +35,9 @@
 
 #define EACH_MOTOR for(int i=0; i<n_motors; i++)
 
+// Optical barrier boolean is false in reference position
+boolean z;
+
 // The array below has 3 stepper objects, for X,Y,Z respectively
 const int n_motors = 3;
 long min_step_delay;
@@ -47,6 +52,24 @@ int steps_remaining[n_motors];
 const int INPUT_BUFFER_LENGTH = 64;
 char input_buffer[INPUT_BUFFER_LENGTH];
 
+boolean check_ref(boolean ref, String name) {  
+  if (analogRead(A0) < 80) {
+    if (ref == false) {
+      ref = true;
+      Serial.print(name);
+      Serial.println(" closed");
+    }
+  }
+  else {
+    if (ref == true) {
+      Serial.print(name);
+      Serial.println(" open");
+    }
+    ref = false;
+  }
+  return ref;
+}
+
 int command_prefix(String command, const char ** prefixes, int n_prefixes){
   // Check if the command starts with any of the prefixes in the list.
   // returns the index if so, otherwise returns -1
@@ -60,7 +83,8 @@ int command_prefix(String command, const char ** prefixes, int n_prefixes){
 
 void setup() {
   // initialise serial port
-  Serial.begin(115200);
+  Serial.begin(115200);//115200
+  Serial.println("OpenFlexure Motor Board v0.3");
   
   // get the stepoper objects from the motor shield objects
   motors[0] = new Stepper(8, 13, 12, 11, 10);
@@ -86,8 +110,6 @@ void setup() {
   }
   #ifdef LIGHT_SENSOR
   setup_light_sensor();
-  #else
-  Serial.println(F("OpenFlexure Motor Board v0.3"));
   #endif /* LIGHT_SENSOR */
   
 }
@@ -178,7 +200,6 @@ void setup_light_sensor(){
   {
     tsl.setGain(TSL2591_GAIN_MED);
     tsl.setTiming(TSL2591_INTEGRATIONTIME_100MS);  // shortest integration time (bright light)
-    Serial.println(F("OpenFlexure Motor Board (with TSL2591 support)"));
   } 
   else 
   {
@@ -254,7 +275,6 @@ Adafruit_ADS1115 ads; // pass in a number for the sensor identifier (for your us
 void setup_light_sensor(){
   ads.begin();
   ads.setGain(GAIN_ONE);
-  Serial.println(F("OpenFlexure Motor Board (with ADS1115 support)"));
 }
 
 void print_light_sensor_gain(){
@@ -323,14 +343,16 @@ void print_light_sensor_integration_time(){
 
 void print_light_sensor_intensity(){
   // Print the current light value
-  // uint16_t x = ads.readADC_SingleEnded(0); //single ended measurement on pin 0
-  uint16_t x = ads.readADC_Differential_0_1(); //differential measurement on pins 0,1
+  uint16_t x = ads.readADC_SingleEnded(0);
   Serial.println(x, DEC);
 }
 
 #endif // ADAFRUIT_ADS1115
 
 void loop() {
+  // Check if z light barrier is open
+  z = check_ref(z, "z");
+  
   // wait for a serial command and read it
   int received_bytes = Serial.readBytesUntil('\n',input_buffer,INPUT_BUFFER_LENGTH-1);
   if(received_bytes > 0){
