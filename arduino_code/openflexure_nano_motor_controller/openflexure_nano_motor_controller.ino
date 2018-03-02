@@ -35,9 +35,6 @@
 
 #define EACH_MOTOR for(int i=0; i<n_motors; i++)
 
-// Optical barrier boolean is false in reference position
-boolean z;
-
 // The array below has 3 stepper objects, for X,Y,Z respectively
 const int n_motors = 3;
 long min_step_delay;
@@ -47,27 +44,22 @@ const int ramp_time_eeprom = sizeof(long)*(n_motors+1);
 Stepper* motors[n_motors];
 signed long current_pos[n_motors];
 int steps_remaining[n_motors];
+boolean endstops_activated = true;
 
 // We'll use this input buffer for serial comms
 const int INPUT_BUFFER_LENGTH = 64;
 char input_buffer[INPUT_BUFFER_LENGTH];
 
-boolean check_ref(boolean ref, String name) {  
-  if (analogRead(A0) < 80) {
-    if (ref == false) {
-      ref = true;
-      Serial.print(name);
-      Serial.println(" closed");
+boolean endstop_reached(int motor) { 
+  if (endstops_activated){
+    Serial.print(motor); 
+    if (analogRead(A0) < 80) {
+        Serial.println(" closed");
+        return true;
     }
+    Serial.println(" open");
   }
-  else {
-    if (ref == true) {
-      Serial.print(name);
-      Serial.println(" open");
-    }
-    ref = false;
-  }
-  return ref;
+  return false;
 }
 
 int command_prefix(String command, const char ** prefixes, int n_prefixes){
@@ -178,12 +170,14 @@ void move_axes(int displacement[n_motors]){
       finished = true;
       EACH_MOTOR{
         if(distance_moved[i] < displacement[i]){
-          finished = false; //only if all axes are done are we truly finished.
+          if (!endstop_reached(i)){
+            finished = false; //only if all axes are done are we truly finished.
           
-          // check if it's time to take another step and move if needed.
-          if(scaled_t > ((float)distance_moved[i] + 0.5) * step_delay[i]){
-            stepMotor(i, dir[i]);
-            distance_moved[i]++;
+            // check if it's time to take another step and move if needed.
+            if(scaled_t > ((float)distance_moved[i] + 0.5) * step_delay[i]){
+              stepMotor(i, dir[i]);
+              distance_moved[i]++;
+            }
           }
         }
       }
@@ -350,9 +344,6 @@ void print_light_sensor_intensity(){
 #endif // ADAFRUIT_ADS1115
 
 void loop() {
-  // Check if z light barrier is open
-  z = check_ref(z, "z");
-  
   // wait for a serial command and read it
   int received_bytes = Serial.readBytesUntil('\n',input_buffer,INPUT_BUFFER_LENGTH-1);
   if(received_bytes > 0){
@@ -436,6 +427,12 @@ void loop() {
       EEPROM.put(0, current_pos);
       return;
     }
+    if(command.startsWith("endstop?")){
+      EACH_MOTOR{
+        endstop_reached(i);
+      }
+      return;
+    }
     #ifdef LIGHT_SENSOR
     if(command.startsWith("light_sensor_gain?")){
       print_light_sensor_gain();
@@ -478,6 +475,7 @@ void loop() {
       Serial.println(F("ramp_time? - get the time taken to accelerate/decelerate in us"));
       Serial.println(F("min_step_delay? - get the minimum time between steps in us."));
       Serial.println(F("zero - set the current position to zero."));
+      Serial.println(F("endstop? - check if endstops are reached"));
       #ifdef LIGHT_SENSOR
       #if defined ADAFRUIT_TSL2591
       Serial.println(F("Compiled with Adafruit TSL2591 support"));
@@ -499,3 +497,4 @@ void loop() {
     return;
   }
 }
+
